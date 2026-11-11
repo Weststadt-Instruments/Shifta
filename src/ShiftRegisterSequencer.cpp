@@ -27,6 +27,11 @@ struct ShiftRegister : Module {
 		POSITION_3,
 		POSITION_4,
 
+		TRANSPOSITION_1,
+		TRANSPOSITION_2,
+		TRANSPOSITION_3,
+		TRANSPOSITION_4,
+
 		PARAMS_LEN
 	};
 
@@ -44,6 +49,11 @@ struct ShiftRegister : Module {
 		POSITION_2_CV,
 		POSITION_3_CV,
 		POSITION_4_CV,
+
+		TRANSPOSITION_1_CV,
+		TRANSPOSITION_2_CV,
+		TRANSPOSITION_3_CV,
+		TRANSPOSITION_4_CV,
 
 		INPUTS_LEN
 	};
@@ -90,6 +100,15 @@ struct ShiftRegister : Module {
 		configParam(POSITION_4, 0.f, 63.f, 48.f, "Sequence Position 4");
 		paramQuantities[POSITION_4]->snapEnabled = true;
 
+		configParam(TRANSPOSITION_1, -24.f, 24.f, 0.f, "Voice 1 Transposition");
+		paramQuantities[TRANSPOSITION_1]->snapEnabled = true;
+		configParam(TRANSPOSITION_2, -24.f, 24.f, 0.f, "Voice 2 Transposition");
+		paramQuantities[TRANSPOSITION_2]->snapEnabled = true;
+		configParam(TRANSPOSITION_3, -24.f, 24.f, 0.f, "Voice 3 Transposition");
+		paramQuantities[TRANSPOSITION_3]->snapEnabled = true;
+		configParam(TRANSPOSITION_4, -24.f, 24.f, 0.f, "Voice 4 Transposition");
+		paramQuantities[TRANSPOSITION_4]->snapEnabled = true;
+
 		configInput(CLOCK_INPUT, "Clock");
 		
 		configInput(SAMPLE_CV_INPUT, "Sample and Hold Signal");
@@ -97,6 +116,7 @@ struct ShiftRegister : Module {
 		for (int i = 0; i < 4; i++) {
 			configInput(REGION_1_LENGTH_CV + i, "Region CV");
 			configInput(POSITION_1_CV + i, "Position CV");
+			configInput(TRANSPOSITION_1_CV + i, "Transposition CV");
 		}
 		
 		configOutput(OUT_1, "sequence position 1");
@@ -148,25 +168,25 @@ struct ShiftRegister : Module {
 		int pos3 = params[POSITION_3].getValue();
 		int pos4 = params[POSITION_4].getValue();
 
-		float pos1cv = inputs[POSITION_1_CV].isConnected()
-			? inputs[POSITION_1_CV].getVoltage()
-			: 0.f;
-		pos1 = clamp((int)std::round(pos1 + pos1cv), 1, 64);
+		if (inputs[POSITION_1_CV].isConnected()) {
+			float pos1cv = std::fabs(inputs[POSITION_1_CV].getVoltage());
+			pos1 = clamp((int)std::round(rescale(pos1cv, 0.f, 10.f, 1.f, 63.f)), 1, 63);
+		}
 
-		float pos2cv = inputs[POSITION_2_CV].isConnected()
-			? inputs[POSITION_2_CV].getVoltage()
-			: 0.f;
-		pos2 = clamp((int)std::round(pos2 + pos2cv), 1, 64);
+		if (inputs[POSITION_2_CV].isConnected()) {
+			float pos2cv = std::fabs(inputs[POSITION_2_CV].getVoltage());
+			pos2 = clamp((int)std::round(rescale(pos2cv, 0.f, 10.f, 1.f, 63.f)), 1, 63);
+		}
 
-		float pos3cv = inputs[POSITION_3_CV].isConnected()
-			? inputs[POSITION_3_CV].getVoltage()
-			: 0.f;
-		pos3 = clamp((int)std::round(pos3 + pos3cv), 1, 64);
+		if (inputs[POSITION_3_CV].isConnected()) {
+			float pos3cv = std::fabs(inputs[POSITION_3_CV].getVoltage());
+			pos3 = clamp((int)std::round(rescale(pos3cv, 0.f, 10.f, 1.f, 63.f)), 1, 63);
+		}
 
-		float pos4cv = inputs[POSITION_4_CV].isConnected()
-			? inputs[POSITION_4_CV].getVoltage()
-			: 0.f;
-		pos4 = clamp((int)std::round(pos4 + pos4cv), 1, 64);
+		if (inputs[POSITION_4_CV].isConnected()) {
+			float pos4cv = std::fabs(inputs[POSITION_4_CV].getVoltage());
+			pos4 = clamp((int)std::round(rescale(pos4cv, 0.f, 10.f, 1.f, 63.f)), 1, 63);
+		}
 
 		if (Trigger.process(inputs[CLOCK_INPUT].getVoltage(),0.1f,2.0f)) {
 
@@ -224,10 +244,37 @@ struct ShiftRegister : Module {
 			
 		}
 
-		float reg1 = values[pos1];
-		float reg2 = values[pos2];
-		float reg3 = values[pos3];
-		float reg4 = values[pos4];
+		float voice1Transposition = params[TRANSPOSITION_1].getValue() / 12;
+		float voice2Transposition = params[TRANSPOSITION_2].getValue() / 12;
+		float voice3Transposition = params[TRANSPOSITION_3].getValue() / 12;
+		float voice4Transposition = params[TRANSPOSITION_4].getValue() / 12;
+
+		float transpose1cv = inputs[TRANSPOSITION_1_CV].isConnected()
+			? inputs[TRANSPOSITION_1_CV].getVoltage() * 12.f
+			: 0.f;
+
+		voice1Transposition = clamp(std::round((voice1Transposition * 12) + transpose1cv), -24.f, 24.f) / 12.f;
+
+		if (inputs[TRANSPOSITION_2_CV].isConnected()) {
+			float transpose2cv = inputs[TRANSPOSITION_2_CV].getVoltage();
+			voice2Transposition = clamp((int)std::round(transpose2cv), -24, 24);
+		}
+
+		if (inputs[TRANSPOSITION_3_CV].isConnected()) {
+			float transpose3cv = inputs[TRANSPOSITION_3_CV].getVoltage();
+			voice3Transposition = clamp((int)std::round(transpose3cv), -24, 24);
+		}
+
+		if (inputs[TRANSPOSITION_4_CV].isConnected()) {
+			float transpose4cv = inputs[TRANSPOSITION_4_CV].getVoltage();
+			voice4Transposition = clamp((int)std::round(transpose4cv), -24, 24);
+		}
+
+
+		float reg1 = values[pos1] + voice1Transposition;
+		float reg2 = values[pos2] + voice2Transposition;
+		float reg3 = values[pos3] + voice3Transposition;
+		float reg4 = values[pos4] + voice4Transposition;
 
 		outputs[OUT_1].setVoltage(reg1);
 		outputs[OUT_2].setVoltage(reg2);
@@ -249,21 +296,45 @@ struct ShiftRegisterWidget : ModuleWidget {
 		addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
 		addInput(createInputCentered<PJ301MPort>(
-			mm2px(Vec(18, 25)),
+			mm2px(Vec(18, 15)),
 			module,
 			ShiftRegister::CLOCK_INPUT
 		));
 
 		addInput(createInputCentered<PJ301MPort>(
-			mm2px(Vec(18, 35)),
+			mm2px(Vec(18, 25)),
 			module,
 			ShiftRegister::SAMPLE_CV_INPUT
+		));
+
+		addParam(createParamCentered<RoundBlackKnob>(
+			mm2px(Vec(63, 25)),
+			module,
+			ShiftRegister::SAMPLECHANCE_PARAM
 		));
 
 		for (int i = 0; i < 4; i++) {
 			float x = 18.f + i * 15.f;
 			addInput(createInputCentered<PJ301MPort>(
-				mm2px(Vec(x, 95)),
+				mm2px(Vec(x, 55)),
+				module,
+				ShiftRegister::POSITION_1_CV + i
+			));
+		}
+
+		for (int i = 0; i < 4; i++) {
+			float x = 18.f + i * 15.f;
+			addInput(createInputCentered<PJ301MPort>(
+				mm2px(Vec(x, 85)),
+				module,
+				ShiftRegister::TRANSPOSITION_1_CV + i
+			));
+		}
+
+		for (int i = 0; i < 4; i++) {
+			float x = 18.f + i * 15.f;
+			addInput(createInputCentered<PJ301MPort>(
+				mm2px(Vec(x, 115)),
 				module,
 				ShiftRegister::REGION_1_LENGTH_CV + i
 			));
@@ -271,23 +342,8 @@ struct ShiftRegisterWidget : ModuleWidget {
 
 		for (int i = 0; i < 4; i++) {
 			float x = 18.f + i * 15.f;
-			addInput(createInputCentered<PJ301MPort>(
-				mm2px(Vec(x, 65)),
-				module,
-				ShiftRegister::POSITION_1_CV + i
-			));
-		}
-
-		addParam(createParamCentered<RoundBlackKnob>(
-			mm2px(Vec(63, 35)),
-			module,
-			ShiftRegister::SAMPLECHANCE_PARAM
-		));
-
-		for (int i = 0; i < 4; i++) {
-			float x = 18.f + i * 15.f;
 			addParam(createParamCentered<RoundBlackKnob>(
-				mm2px(Vec(x, 55)),
+				mm2px(Vec(x, 45)),
 				module,
 				ShiftRegister::POSITION_1 + i
 			));
@@ -296,17 +352,26 @@ struct ShiftRegisterWidget : ModuleWidget {
 		for (int i = 0; i < 4; i++) {
 			float x = 18.f + i * 15.f;
 			addParam(createParamCentered<RoundBlackKnob>(
-				mm2px(Vec(x, 85)),
+				mm2px(Vec(x, 75)),
+				module,
+				ShiftRegister::TRANSPOSITION_1 + i
+			));
+		}
+
+		for (int i = 0; i < 4; i++) {
+			float x = 18.f + i * 15.f;
+			addParam(createParamCentered<RoundBlackKnob>(
+				mm2px(Vec(x, 105)),
 				module,
 				ShiftRegister::REGION_1_LENGTH + i
 			));
 		}
 
 
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(18, 120)), module, ShiftRegister::OUT_1));
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 120)), module, ShiftRegister::OUT_2));
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(48, 120)), module, ShiftRegister::OUT_3));
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(63, 120)), module, ShiftRegister::OUT_4));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(18, 125)), module, ShiftRegister::OUT_1));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 125)), module, ShiftRegister::OUT_2));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(48, 125)), module, ShiftRegister::OUT_3));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(63, 125)), module, ShiftRegister::OUT_4));
 
 
 	}
