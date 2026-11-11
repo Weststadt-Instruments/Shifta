@@ -14,6 +14,18 @@ struct ShiftRegister : Module {
 
 	int regionLengths[4] = { 16,16,16,16 };
 
+	std::atomic<int> positionRegions[4];
+
+	float voice1Transposition = 0.f;
+	float voice2Transposition = 0.f;
+	float voice3Transposition = 0.f;
+	float voice4Transposition = 0.f;
+
+	float transpose1cv = 0.f;
+	float transpose2cv = 0.f;
+	float transpose3cv = 0.f;
+	float transpose4cv = 0.f;
+
 	enum ParamId {
 		SAMPLECHANCE_PARAM,
 
@@ -74,6 +86,10 @@ struct ShiftRegister : Module {
 
 	ShiftRegister() {
 
+		for (int i = 0; i < 4; i++) {
+			positionRegions[i].store(i + 1);
+		}
+
 		for (int i = 0; i < SIZE; i++) {
 			values[i] = 0.f;
 		}
@@ -126,6 +142,17 @@ struct ShiftRegister : Module {
 
 	}
 
+	int getRegionForPosition(int pos) {
+		for (int i = 0; i < (int)regions.size(); i++) {
+			if (pos >= regions[i].first &&
+				pos <= regions[i].second) {
+				return i + 1;
+			}
+		}
+
+		return 0;
+	}
+
 	void buildRegions() {
 		regions.clear();
 
@@ -162,6 +189,11 @@ struct ShiftRegister : Module {
 	}
 
 	void process(const ProcessArgs& args) override {
+
+		voice1Transposition = params[TRANSPOSITION_1].getValue() / 12;
+		voice2Transposition = params[TRANSPOSITION_2].getValue() / 12;
+		voice3Transposition = params[TRANSPOSITION_3].getValue() / 12;
+		voice4Transposition = params[TRANSPOSITION_4].getValue() / 12;
 
 		int pos1 = params[POSITION_1].getValue();
 		int pos2 = params[POSITION_2].getValue();
@@ -241,46 +273,79 @@ struct ShiftRegister : Module {
 					shiftRegion(region.first, region.second);
 				}
 			}
-			
+			transpose1cv = inputs[TRANSPOSITION_1_CV].isConnected()
+				? inputs[TRANSPOSITION_1_CV].getVoltage() * 12.f
+				: 0.f;
+			transpose2cv = inputs[TRANSPOSITION_2_CV].isConnected()
+				? inputs[TRANSPOSITION_2_CV].getVoltage() * 12.f
+				: 0.f;
+			transpose3cv = inputs[TRANSPOSITION_3_CV].isConnected()
+				? inputs[TRANSPOSITION_3_CV].getVoltage() * 12.f
+				: 0.f;
+			transpose4cv = inputs[TRANSPOSITION_4_CV].isConnected()
+				? inputs[TRANSPOSITION_4_CV].getVoltage() * 12.f
+				: 0.f;
 		}
-
-		float voice1Transposition = params[TRANSPOSITION_1].getValue() / 12;
-		float voice2Transposition = params[TRANSPOSITION_2].getValue() / 12;
-		float voice3Transposition = params[TRANSPOSITION_3].getValue() / 12;
-		float voice4Transposition = params[TRANSPOSITION_4].getValue() / 12;
-
-		float transpose1cv = inputs[TRANSPOSITION_1_CV].isConnected()
-			? inputs[TRANSPOSITION_1_CV].getVoltage() * 12.f
-			: 0.f;
 
 		voice1Transposition = clamp(std::round((voice1Transposition * 12) + transpose1cv), -24.f, 24.f) / 12.f;
-
-		if (inputs[TRANSPOSITION_2_CV].isConnected()) {
-			float transpose2cv = inputs[TRANSPOSITION_2_CV].getVoltage();
-			voice2Transposition = clamp((int)std::round(transpose2cv), -24, 24);
-		}
-
-		if (inputs[TRANSPOSITION_3_CV].isConnected()) {
-			float transpose3cv = inputs[TRANSPOSITION_3_CV].getVoltage();
-			voice3Transposition = clamp((int)std::round(transpose3cv), -24, 24);
-		}
-
-		if (inputs[TRANSPOSITION_4_CV].isConnected()) {
-			float transpose4cv = inputs[TRANSPOSITION_4_CV].getVoltage();
-			voice4Transposition = clamp((int)std::round(transpose4cv), -24, 24);
-		}
-
+		voice2Transposition = clamp(std::round((voice2Transposition * 12) + transpose2cv), -24.f, 24.f) / 12.f;
+		voice3Transposition = clamp(std::round((voice3Transposition * 12) + transpose3cv), -24.f, 24.f) / 12.f;
+		voice4Transposition = clamp(std::round((voice4Transposition * 12) + transpose4cv), -24.f, 24.f) / 12.f;
 
 		float reg1 = values[pos1] + voice1Transposition;
 		float reg2 = values[pos2] + voice2Transposition;
 		float reg3 = values[pos3] + voice3Transposition;
 		float reg4 = values[pos4] + voice4Transposition;
 
+		positionRegions[0].store(getRegionForPosition(pos1));
+		positionRegions[1].store(getRegionForPosition(pos2));
+		positionRegions[2].store(getRegionForPosition(pos3));
+		positionRegions[3].store(getRegionForPosition(pos4));
+
 		outputs[OUT_1].setVoltage(reg1);
 		outputs[OUT_2].setVoltage(reg2);
 		outputs[OUT_3].setVoltage(reg3);
 		outputs[OUT_4].setVoltage(reg4);
 
+	}
+};
+
+struct RegionReadout : TransparentWidget {
+	ShiftRegister* module;
+	int voice;
+
+	RegionReadout(ShiftRegister* module, int voice) {
+		this->module = module;
+		this->voice = voice;
+
+		box.size = Vec(12, 12);
+	}
+
+	void draw(const DrawArgs& args) override {
+		if (!module)
+			return;
+
+		int region = module->positionRegions[voice].load();
+
+		char text[4];
+
+		if (region == 0)
+			snprintf(text, sizeof(text), "-");
+		else
+			snprintf(text, sizeof(text), "%d", region);
+
+		nvgFontSize(args.vg, 12);
+		nvgFillColor(args.vg, nvgRGB(255, 255, 255));
+
+		nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+
+		nvgText(
+			args.vg,
+			box.size.x / 2,
+			box.size.y / 2,
+			text,
+			NULL
+		);
 	}
 };
 
@@ -342,11 +407,16 @@ struct ShiftRegisterWidget : ModuleWidget {
 
 		for (int i = 0; i < 4; i++) {
 			float x = 18.f + i * 15.f;
+
 			addParam(createParamCentered<RoundBlackKnob>(
 				mm2px(Vec(x, 45)),
 				module,
 				ShiftRegister::POSITION_1 + i
 			));
+
+			auto display = new RegionReadout(module, i);
+			display->box.pos = mm2px(Vec(x - 1.6f, 36.f));
+			addChild(display);
 		}
 
 		for (int i = 0; i < 4; i++) {
